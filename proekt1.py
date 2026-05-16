@@ -122,7 +122,7 @@ async def start(message: Message):
         "/grant ID — выдать доступ (админ)\n"
         "Давай начнём 👇"
     )
-    grant_access(message.from_user.id)
+    grant_access(message.from_user.id,30)
     await message.answer(
         "Кому выбираем подарок?",
         reply_markup=ReplyKeyboardMarkup(
