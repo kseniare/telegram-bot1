@@ -6,13 +6,69 @@ from aiogram.filters import CommandStart
 from dotenv import load_dotenv
 from openai import OpenAI
 
+from datetime import datetime, timedelta
+
 
 load_dotenv()
 bot = Bot(token=os.getenv("BOT_TOKEN"))
 dp = Dispatcher()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
 user_data = {}
+users = set()
+
+#Функция выдачи доступа
+def grant_access(user_id, days):
+    expires = datetime.now() + timedelta(days=days)
+
+    cursor.execute("""
+    INSERT INTO access (user_id, expires_at)
+    VALUES (%s, %s)
+    ON CONFLICT (user_id)
+    DO UPDATE SET expires_at = EXCLUDED.expires_at
+    """, (user_id, expires))
+
+    conn.commit()
+#Функция проверки доступа
+def has_access(user_id):
+    cursor.execute("""
+    SELECT expires_at FROM access WHERE user_id = %s
+    """, (user_id,))
+
+    result = cursor.fetchone()
+
+    if not result:
+        return False
+
+    expires_at = result[0]
+
+    return datetime.now() < expires_at
+
+from aiogram.filters import Command
+
+ADMIN_ID = 681260277   # Telegram ID
+from aiogram.filters import Command
+
+@dp.message(Command("id"))
+async def get_id(message: Message):
+    await message.answer(f"Твой ID: {message.from_user.id}")
+
+@dp.message(Command("grant"))
+async def grant_user(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ Нет доступа")
+        return
+
+    try:
+        parts = message.text.split()
+
+        target_id = int(parts[1])
+        days = int(parts[2])  # ← ВРЕМЯ
+
+        grant_access(target_id, days)
+
+        await message.answer(f"✅ Доступ выдан на {days} дней(день)")
+    except:
+        await message.answer("Используй: /grant user_id дней")
 
 # --- КЛАВИАТУРЫ ---
 
@@ -30,7 +86,7 @@ def budget_kb():
             [KeyboardButton(text="До 1000 ₽")],
             [KeyboardButton(text="1000–5000 ₽")],
             [KeyboardButton(text="5000–10000 ₽")],
-            [KeyboardButton(text="10000+ ₽")]
+            [KeyboardButton(text="10000-50000 ₽")],[KeyboardButton(text="50000 + ₽")]
         ],
         resize_keyboard=True
     )
@@ -51,9 +107,22 @@ def occasion_kb():
 
 # --- СТАРТ ---
 
+#@dp.message(CommandStart())
+#async def start(message: Message):
 @dp.message(CommandStart())
 async def start(message: Message):
+    users.add(message.from_user.id)
     user_data[message.from_user.id] = {"step": 1}
+    await message.answer(
+        "👋 Привет!\n\n"
+        "Я помогу подобрать подарок 🎁\n\n"
+        "📌 Команды:\n"
+        "/start — начать заново\n"
+        "/id — узнать свой ID\n"
+        "/grant ID — выдать доступ (админ)\n"
+        "Давай начнём 👇"
+    )
+    grant_access(message.from_user.id)
     await message.answer(
         "Кому выбираем подарок?",
         reply_markup=ReplyKeyboardMarkup(
@@ -66,6 +135,12 @@ async def start(message: Message):
             resize_keyboard=True
         )
     )
+from aiogram.filters import Command
+@dp.message(Command("admin"))
+async def admin(message: Message):
+    await message.answer(f"👥 Пользователей: {len(users)}")
+
+
 def interests_kb():
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -82,7 +157,10 @@ def interests_kb():
 @dp.message()
 async def handler(message: Message):
     user_id = message.from_user.id
-
+    if not message.text.startswith("/start"):
+        if user_id != ADMIN_ID and not has_access(user_id):
+            await message.answer("⛔ Доступ закрыт или истёк")
+            return
     if user_id not in user_data:
         user_data[user_id] = {"step": 1}
         await message.answer("Кому выбираем подарок?")
@@ -117,7 +195,12 @@ async def handler(message: Message):
 
     elif step == 6:
         user_data[user_id]["interests"] = message.text
-
+        print("🔥 СОХРАНЯЮ:", user_data[user_id])
+        try:
+            save_to_db(user_id, user_data[user_id])
+            print("✅ СОХРАНЕНО")
+        except Exception as e:
+            print("❌ ОШИБКА:", e)
         await message.answer("🤖 Подбираю идеи...")
 
         prompt = f"""
@@ -169,6 +252,50 @@ async def handler(message: Message):
         # сброс
         user_data[user_id] = {"step": 1}
         await message.answer("Хочешь ещё? Напиши кому 🙂")
+
+# --- База данных ---
+import psycopg2
+
+conn = psycopg2.connect(
+    dbname="postgres",
+    user="postgres",
+    password="1234",
+    host="localhost",
+    port="5433"
+)
+
+cursor = conn.cursor()
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    user_id BIGINT,
+    person TEXT,
+    gender TEXT,
+    age TEXT,
+    budget TEXT,
+    occasion TEXT,
+    interests TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+""")
+conn.commit()
+
+def save_to_db(user_id, data):
+    cursor.execute("""
+    INSERT INTO users (user_id, person, gender, age, budget, occasion, interests)
+    VALUES (%s, %s, %s, %s, %s, %s, %s)
+    """, (
+        user_id,
+        data.get("person"),
+        data.get("gender"),
+        data.get("age"),
+        data.get("budget"),
+        data.get("occasion"),
+        data.get("interests")
+    ))
+    conn.commit()
+
+
 
 # --- ЗАПУСК ---
 
