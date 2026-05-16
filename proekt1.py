@@ -201,6 +201,7 @@ async def handler(message: Message):
             save_to_db(user_id, user_data[user_id])
             print("✅ СОХРАНЕНО")
         except Exception as e:
+            conn.rollback()
             print("❌ ОШИБКА:", e)
         await message.answer("🤖 Подбираю идеи...")
 
