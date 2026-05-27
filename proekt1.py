@@ -16,7 +16,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 user_data = {}
 users = set()
 
-#Функция выдачи доступа
+# Функция выдачи доступа
 def grant_access(user_id, days):
     expires = datetime.now() + timedelta(days=days)
 
@@ -28,48 +28,28 @@ def grant_access(user_id, days):
     """, (user_id, expires))
 
     conn.commit()
-#Функция проверки доступа
+
+    print(f"Выдан доступ: {user_id} до {expires}")  # добавили
+
+
+# Функция проверки доступа
 def has_access(user_id):
     cursor.execute("""
-    SELECT expires_at FROM access WHERE user_id = %s
+    SELECT expires_at
+    FROM access
+    WHERE user_id = %s
     """, (user_id,))
 
     result = cursor.fetchone()
 
-    if not result:
+    print("Проверка:", result)   # добавили
+
+    if result is None:
         return False
 
     expires_at = result[0]
 
     return datetime.now() < expires_at
-
-from aiogram.filters import Command
-
-ADMIN_ID = 681260277   # Telegram ID
-from aiogram.filters import Command
-
-@dp.message(Command("id"))
-async def get_id(message: Message):
-    await message.answer(f"Твой ID: {message.from_user.id}")
-
-@dp.message(Command("grant"))
-async def grant_user(message: Message):
-    if message.from_user.id != ADMIN_ID:
-        await message.answer("❌ Нет доступа")
-        return
-
-    try:
-        parts = message.text.split()
-
-        target_id = int(parts[1])
-        days = int(parts[2])  # ← ВРЕМЯ
-
-        grant_access(target_id, days)
-
-        await message.answer(f"✅ Доступ выдан на {days} дней(день)")
-    except:
-        await message.answer("Используй: /grant user_id дней")
-
 # --- КЛАВИАТУРЫ ---
 
 def gender_kb():
